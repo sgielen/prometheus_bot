@@ -21,6 +21,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"
+	"github.com/masterminds/sprig"
 	"github.com/microcosm-cc/bluemonday"
 	"gopkg.in/telegram-bot-api.v4"
 
@@ -286,11 +287,38 @@ func str_FormatDate(toformat string) string {
 	return t.In(loc).Format(cfg.TimeOutFormat)
 }
 
+func str_FormatSince(date string) string {
+	t, err := time.Parse(time.RFC3339Nano, date)
+	if err != nil {
+		fmt.Println(err)
+	}
+	nsSince := time.Since(t)
+	if nsSince > time.Hour*24*6 {
+		return fmt.Sprintf("%d days", nsSince/(time.Hour*24))
+	} else if nsSince > (time.Hour * 2) {
+		return fmt.Sprintf("%d hours", nsSince/time.Hour)
+	} else if nsSince > (time.Minute * 2) {
+		return fmt.Sprintf("%d minutes", nsSince/time.Minute)
+	} else if nsSince > time.Second {
+		return fmt.Sprintf("%d seconds", nsSince/time.Second)
+	} else {
+		return fmt.Sprintf("less than a second")
+	}
+}
+
 func HasKey(dict map[string]interface{}, key_search string) bool {
 	if _, ok := dict[key_search]; ok {
 		return true
 	}
 	return false
+}
+
+func time_SecondsSince(date string) int64 {
+	t, err := time.Parse(time.RFC3339Nano, date)
+	if err != nil {
+		fmt.Println(err)
+	}
+	return int64(time.Since(t) / time.Second)
 }
 
 // Global
@@ -305,16 +333,7 @@ var bot *tgbotapi.BotAPI
 var tmpH *template.Template
 
 // Template addictional functions map
-var funcMap = template.FuncMap{
-	"str_FormatDate":         str_FormatDate,
-	"str_UpperCase":          strings.ToUpper,
-	"str_LowerCase":          strings.ToLower,
-	"str_Title":              strings.Title,
-	"str_FormatFloat":        str_FormatFloat,
-	"str_Format_Byte":        str_Format_Byte,
-	"str_Format_MeasureUnit": str_Format_MeasureUnit,
-	"HasKey":                 HasKey,
-}
+var funcMap template.FuncMap
 
 func telegramBot(bot *tgbotapi.BotAPI) {
 	u := tgbotapi.NewUpdate(0)
@@ -351,6 +370,26 @@ func telegramBot(bot *tgbotapi.BotAPI) {
 }
 
 func loadTemplate(tmplPath string) *template.Template {
+	if funcMap == nil {
+		funcMap = sprig.HtmlFuncMap()
+
+		ourFuncMap := template.FuncMap{
+			"str_FormatDate":         str_FormatDate,
+			"str_FormatSince":        str_FormatSince,
+			"str_UpperCase":          strings.ToUpper,
+			"str_LowerCase":          strings.ToLower,
+			"str_Title":              strings.Title,
+			"str_FormatFloat":        str_FormatFloat,
+			"str_Format_Byte":        str_Format_Byte,
+			"str_Format_MeasureUnit": str_Format_MeasureUnit,
+			"HasKey":                 HasKey,
+			"time_SecondsSince":      time_SecondsSince,
+		}
+		for k, v := range ourFuncMap {
+			funcMap[k] = v
+		}
+	}
+
 	// let's read template
 	tmpH, err := template.New(path.Base(tmplPath)).Funcs(funcMap).ParseFiles(cfg.TemplatePath)
 
