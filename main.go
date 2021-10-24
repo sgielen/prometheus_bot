@@ -57,7 +57,7 @@ type Config struct {
 	SplitChart        string `yaml:"split_token"`
 	SplitMessageBytes int    `yaml:"split_msg_byte"`
 	SendOnly          bool   `yaml:"send_only"`
-	DeadManSwitchName string `yaml:"dead_man_switch_name"`
+	DeadmanSwitchName string `yaml:"deadman_switch_name"`
 }
 
 /**
