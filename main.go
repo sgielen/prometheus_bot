@@ -57,6 +57,7 @@ type Config struct {
 	SplitChart        string `yaml:"split_token"`
 	SplitMessageBytes int    `yaml:"split_msg_byte"`
 	SendOnly          bool   `yaml:"send_only"`
+	DeadManSwitchName string `yaml:"dead_man_switch_name"`
 }
 
 /**
@@ -327,10 +328,12 @@ var token_path = flag.String("token-from", "", "Path to a file containing telegr
 var listen_addr = flag.String("l", ":9087", "Listen address")
 var template_path = flag.String("t", "", "Path to a template file")
 var debug = flag.Bool("d", false, "Debug template")
+var deadmanswitch = flag.String("deadman-switch-name", "", "Name of your dead man's switch alert. If set, an alert will be sent if that alert is _not_ firing.")
 
 var cfg = Config{}
 var bot *tgbotapi.BotAPI
 var tmpH *template.Template
+var lastAlertsStatus string
 
 // Template addictional functions map
 var funcMap template.FuncMap
@@ -443,6 +446,10 @@ func main() {
 			log.Fatalf("Problem reading token file: %v", err)
 		}
 		cfg.TelegramToken = strings.TrimSpace(string(content))
+	}
+
+	if *deadmanswitch != "" {
+		cfg.DeadmanSwitchName = *deadmanswitch
 	}
 
 	if cfg.SplitMessageBytes == 0 {
@@ -657,6 +664,58 @@ func POST_Handling(c *gin.Context) {
 	log.Println("+------------------  A L E R T  J S O N  -------------------+")
 	log.Printf("%s", s)
 	log.Println("+-----------------------------------------------------------+\n\n")
+
+	if cfg.DeadmanSwitchName != "" {
+		// If the DeadmanSwitch alert is firing, remove it from the list of alerts
+		deadmanSwitchFiring := false
+		for i, alert := range alerts.Alerts {
+			if alert.Labels["alertname"] == cfg.DeadmanSwitchName {
+				deadmanSwitchFiring = true
+				alerts.Alerts[i] = alerts.Alerts[len(alerts.Alerts)-1]
+				alerts.Alerts = alerts.Alerts[:len(alerts.Alerts)-1]
+				break
+			}
+		}
+
+		// If the DeadmanSwitch alert is not firing, add this to the list of alerts
+		if !deadmanSwitchFiring {
+			alerts.Alerts = append(alerts.Alerts, Alert{
+				Annotations: {
+					description: "DeadmanSwitch is NOT firing. Something is wrong with the alerting stack.",
+					summary:     "DeadmanSwitch is NOT firing",
+				},
+				EndsAt:       "",
+				GeneratorURL: "",
+				Labels: {
+					alertname: cfg.DeadmanSwitchName + "NotFiring",
+					severity:  "critical",
+				},
+				StartsAt: time.Now().Format(time.RFC3339Nano),
+				Status:   "firing",
+			})
+			alerts.Status = "firing"
+		}
+
+		// If no alerts are firing, set status to resolved
+		otherAlertsFiring := false
+		for _, alert := range alerts.Alerts {
+			if alert.Status == "firing" {
+				otherAlertsFiring = true
+				break
+			}
+		}
+		if !otherAlertsFiring {
+			alerts.Status = "resolved"
+		}
+
+		// If, at this point, the status is resolved and the last status was also
+		// resolved, ignore this call
+		if lastAlertsStatus == "resolved" && alerts.Status == "resolved" {
+			return
+		}
+
+		lastAlertsStatus = alerts.Status
+	}
 
 	// Decide how format Text
 	if cfg.TemplatePath == "" {
